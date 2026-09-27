@@ -12,27 +12,53 @@
  *   node scripts/build-report-docx.mjs reports/…/report.md    # given reports
  *   node scripts/build-report-docx.mjs --changed              # changed in HEAD
  *   node scripts/build-report-docx.mjs --changed --since=main
+ *   node scripts/build-report-docx.mjs --files-from=changed.txt   # reports these files touch
+ *   node scripts/build-report-docx.mjs --all                      # every report of the branch
+ *
+ *   --list=built.txt   append the path of every document built (CI preview)
+ *
+ * Next to every .docx goes its PDF, converted by LibreOffice (scripts/lib/pdf.mjs)
+ * when the .docx changed; --rebuild-pdf converts every one again.
+ * Without LibreOffice the PDF is skipped with a warning, unless
+ * REPORTS_REQUIRE_PDF=1 — as in CI — makes that an error.
+ *
+ * Every document is checked against the samples (scripts/lib/report-checks.mjs)
+ * before it is kept; a report that fails leaves no document behind, and the
+ * exit status is 1.
  */
 
 import { spawnSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdtempSync } from 'fs';
-import { join, dirname, basename, relative } from 'path';
+import { join, dirname, basename, relative, resolve, sep } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
-import { convert, run } from './lib/docx.mjs';
+import { convert, run, sourceDateEpoch } from './lib/docx.mjs';
+import { pdfOf, soffice, toPdf } from './lib/pdf.mjs';
 import { parseFrontmatter } from './lib/frontmatter.mjs';
+import { answerLevels, checkPdf, checkReport, reportWarnings } from './lib/report-checks.mjs';
+
+// CI sets it: there a report without its PDF is a failed report. Locally the
+// PDF is made when LibreOffice is installed and skipped with a warning if not.
+const REQUIRE_PDF = process.env.REPORTS_REQUIRE_PDF === '1';
+
+// --rebuild-pdf converts even when the .docx did not change — after a change
+// to the conversion itself (LibreOffice, fonts)
+const REBUILD_PDF = process.argv.includes('--rebuild-pdf');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONTENT = join(ROOT, 'content', 'uk');
 const REPORTS = join(ROOT, 'reports');
 const TEMPLATE = join(ROOT, 'scripts', 'templates', 'report-template.docx');
 const TITLE_TEMPLATES = join(ROOT, 'scripts', 'templates');
+const FILTER = join(ROOT, 'scripts', 'templates', 'report-filter.lua');
 
-// Text width of a report: A4 minus the 25 and 10 mm margins
+// Text width of a report: A4 minus the 25 and 10 mm margins. Tables as in the
+// report sample: centred, header row centred, rows at least 0.8 cm high.
 const LAYOUT = {
   tableWidth: 11906 - 1418 - 567,
-  list: { left: 1134, hanging: 425, bullet: '–' }
+  list: { left: 1134, hanging: 425, bullet: '–' },
+  table: { align: 'center', headerAlign: 'center', rowHeight: 454 }
 };
 
 const TEACHER = 'Костенко А.О.';
@@ -65,6 +91,35 @@ function workCode({ specialty, abbr, number, lab }) {
 function academicYear(date = new Date()) {
   const start = date.getMonth() >= 8 ? date.getFullYear() : date.getFullYear() - 1;
   return `${start} - ${start + 1}`;
+}
+
+/**
+ * Name as the title page signs it: "Костенко Артем Олегович" → "Костенко А.О.",
+ * the way the teacher's name is written a line below. The frontmatter keeps
+ * the full name; a name of one word is left as it is.
+ */
+export function signature(fullName) {
+  const [surname, ...given] = String(fullName).trim().split(/\s+/);
+  if (!given.length) return surname;
+  return `${surname} ${given.map(name => `${name[0].toUpperCase()}.`).join('')}`;
+}
+
+/**
+ * Every picture the report embeds must exist next to it. Pandoc replaces a
+ * picture it cannot read with the alt text and goes on, so a report whose
+ * screenshots were never uploaded built into a document with captions and no
+ * pictures. The path also has to stay inside the student's directory.
+ */
+export function missingImages(body, reportDir) {
+  const images = [...body.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)].map(m => m[1]);
+
+  return images
+    .filter(src => !/^[a-z]+:/i.test(src))
+    .filter(src => {
+      let path;
+      try { path = resolve(reportDir, decodeURI(src)); } catch { return true; }
+      return !path.startsWith(reportDir + sep) || !existsSync(path) || !statSync(path).isFile();
+    });
 }
 
 function fail(message) {
@@ -125,7 +180,7 @@ function titlePage(report) {
   const values = {
     lab: report.lab,
     discipline: DISCIPLINE[report.course] ?? report.course,
-    student: report.student,
+    student: signature(report.student),
     group: report.groupTitle,
     teacher: report.teacher ?? TEACHER,
     year: report.year ?? new Date().getFullYear(),
@@ -186,6 +241,22 @@ function isStub(body) {
     );
 }
 
+/**
+ * The student's full name from the group list. The list is the teacher's and
+ * is kept up to date; the name in a report's frontmatter is a copy made when
+ * the assignment was opened, and it stays as it was when the list is corrected
+ * later — a patronymic added, a typo fixed. So the title page and the document
+ * properties take the name from the list, by the student's number, and the
+ * frontmatter only stands in for a group that has no list.
+ */
+function listedName({ course, group, student }) {
+  const path = join(REPORTS, course, 'groups', group, 'students.json');
+  if (!existsSync(path)) return null;
+
+  const list = JSON.parse(readFileSync(path, 'utf8'));
+  return list.students?.find(entry => Number(entry.number) === Number(student))?.name?.trim() || null;
+}
+
 function buildReport(reportPath) {
   const location = parsePath(reportPath);
   const { data, body } = parseFrontmatter(readFileSync(reportPath, 'utf8'));
@@ -195,7 +266,7 @@ function buildReport(reportPath) {
     return null;
   }
 
-  for (const field of ['course', 'group', 'lab', 'student']) {
+  for (const field of ['course', 'group', 'lab']) {
     if (!data[field]) throw new Error(`frontmatter has no "${field}" field`);
   }
   // A report filed in the wrong folder would be built under somebody else's
@@ -213,12 +284,39 @@ function buildReport(reportPath) {
     throw new Error(`frontmatter says ${field} ${stated}, the path says ${inPath}`);
   }
 
+  const listed = listedName(location);
+  const student = listed ?? (data.student ? String(data.student).trim() : null);
+  if (!student) {
+    throw new Error(`student ${location.student} is not in the group list, and the frontmatter has no "student" field`);
+  }
+  if (listed && data.student && String(data.student).trim() !== listed) {
+    console.warn(`[warn] ${relative(ROOT, reportPath)}: the frontmatter names "${data.student}", ` +
+      `the group list "${listed}" — the list is used`);
+  }
+
   const programs = JSON.parse(readFileSync(join(CONTENT, data.course, '_programs.json'), 'utf8'));
   const groupEntry = programs.groups?.find(entry => entry.id === data.group);
+
+  const levels = answerLevels(body);
+  if (levels.length > 1) {
+    throw new Error(
+      `the answers cover ${levels.length} levels (${levels.join(', ')}) — ` +
+      'answer the questions of one level only, the one you defend the work for'
+    );
+  }
+
+  const missing = missingImages(body.replace(/<!--[\s\S]*?-->/g, ''), dirname(reportPath));
+  if (missing.length) {
+    throw new Error(
+      `the report shows ${missing.length === 1 ? 'a picture that is' : 'pictures that are'} not in the repository: ` +
+      `${missing.join(', ')} — upload ${missing.length === 1 ? 'it' : 'them'} next to report.md (assets/)`
+    );
+  }
 
   const lab = findLab(data);
   const report = {
     ...data,
+    student,
     // the folder is the position in the group, so the path is the source of it
     number: Number(location.student),
     groupTitle: groupEntry?.title ?? data.group,
@@ -254,6 +352,10 @@ function buildReport(reportPath) {
     `ЛР${String(data.lab).padStart(2, '0')}_${location.student}.docx`
   );
 
+  // The document as it was before this build: if the new one comes out the
+  // same, its PDF does not need converting again (see below)
+  const previous = existsSync(outputPath) ? readFileSync(outputPath) : null;
+
   try {
     const sourcePath = join(work, 'report.md');
     writeFileSync(sourcePath, source);
@@ -261,17 +363,116 @@ function buildReport(reportPath) {
     convert(sourcePath, outputPath, {
       dateFrom: reportPath,
       referenceDoc: TEMPLATE,
+      filter: FILTER,
       layout: LAYOUT,
+      properties: { title: `${lab.topic}. Звіт з лабораторної роботи №${data.lab}`, author: student },
       cwd: ROOT,
       // report images are relative to the student's directory
       resourcePath: dirname(reportPath)
     });
 
+    // The document is kept only if it matches the samples; a failed check
+    // leaves nothing behind for the pipeline to commit
+    const expected = {
+      body,
+      student,
+      signature: signature(student),
+      lab: data.lab,
+      code: workCode(report)
+    };
+    const problems = checkReport(outputPath, expected);
+    if (problems.length) {
+      rmSync(outputPath, { force: true });
+      throw new Error(`the document does not match the report sample:\n  - ${problems.join('\n  - ')}`);
+    }
+
+    for (const warning of reportWarnings(body)) {
+      console.warn(`[warn] ${relative(ROOT, reportPath)}: ${warning}`);
+    }
     console.log(`[ok] ${relative(ROOT, outputPath)}`);
-    return outputPath;
+
+    // The PDF is made from the checked .docx and checked in turn. The two go
+    // together: a PDF that fails takes the .docx with it, so the repository
+    // never holds one without the other, or two that disagree.
+    const pdfPath = pdfOf(outputPath);
+    if (!soffice() && !REQUIRE_PDF) {
+      // The PDF of an unchanged document is still its PDF and stays; the PDF
+      // of a changed one no longer matches it and goes
+      const current = existsSync(pdfPath) && previous?.equals(readFileSync(outputPath));
+      if (!current) rmSync(pdfPath, { force: true });
+      console.warn(`[warn] LibreOffice is not installed — ${basename(pdfPath)} ${current ? 'kept as it is' : 'not made'}`);
+      return { docx: outputPath, pdf: current ? pdfPath : null };
+    }
+
+    try {
+      // LibreOffice does not export the same bytes twice — it embeds the fonts
+      // in a different order each run — so a PDF is made again only when its
+      // .docx changed. The .docx is reproducible: the same report gives the
+      // same bytes, and then the PDF next to it is still the PDF of it. It is
+      // checked all the same, and converted again if it fails.
+      const unchanged = !REBUILD_PDF && previous && existsSync(pdfPath) &&
+        previous.equals(readFileSync(outputPath)) && checkPdf(pdfPath, expected).length === 0;
+
+      if (unchanged) {
+        console.log(`[ok] ${relative(ROOT, pdfPath)} — the document did not change, the PDF is kept`);
+        return { docx: outputPath, pdf: pdfPath };
+      }
+
+      toPdf(outputPath, { epoch: sourceDateEpoch(reportPath) });
+      const pdfProblems = checkPdf(pdfPath, expected);
+      if (pdfProblems.length) {
+        throw new Error(`the PDF does not match the report sample:\n  - ${pdfProblems.join('\n  - ')}`);
+      }
+    } catch (error) {
+      rmSync(pdfPath, { force: true });
+      rmSync(outputPath, { force: true });
+      throw error;
+    }
+
+    console.log(`[ok] ${relative(ROOT, pdfPath)}`);
+    return { docx: outputPath, pdf: pdfPath };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/**
+ * Reports a list of changed files touches. A screenshot uploaded after the text
+ * changes the document as much as the text does, so any file inside a
+ * student's directory — report.md, assets/, src/ — or the generated .docx
+ * itself (it came over from a branch built by an older pipeline) stands for
+ * the report.md next to it. Deleted reports and internal directories
+ * (_template) are left out.
+ */
+export function reportsOf(paths) {
+  const reports = new Set();
+
+  for (const path of paths.map(line => line.trim()).filter(Boolean)) {
+    const parts = path.split('/');
+    const at = parts.indexOf('students');
+    if (parts[0] !== 'reports' || at === -1 || parts.length < at + 3) continue;
+    if (parts.some(part => part.startsWith('_'))) continue;
+
+    const report = join(ROOT, ...parts.slice(0, at + 2), 'report.md');
+    if (existsSync(report)) reports.add(report);
+  }
+
+  return [...reports].sort();
+}
+
+/** Every report in the working tree */
+function allReports() {
+  const found = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('_') || entry.name.startsWith('.')) continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name === 'report.md') found.push(path);
+    }
+  };
+  if (existsSync(REPORTS)) walk(REPORTS);
+  return found.sort();
 }
 
 /** Reports changed in the last commit, or against the given ref */
@@ -286,36 +487,71 @@ function changedReports(since) {
   }
 
   const range = resolvable ? `${since}...HEAD` : 'HEAD~1..HEAD';
-  const output = run('git', ['diff', '--name-only', '--diff-filter=d', range], { cwd: ROOT });
+  return reportsOf(run('git', ['diff', '--name-only', range], { cwd: ROOT }).split('\n'));
+}
 
-  return output
-    .split('\n')
-    .filter(line => /^reports\/.*\/report\.md$/.test(line))
-    // underscore directories are internal (template, samples)
-    .filter(line => !line.split('/').some(part => part.startsWith('_')))
-    .map(line => join(ROOT, line));
+/** Where a report's document goes: ЛР<lab>_<student>.docx next to it */
+function outputOf(reportPath) {
+  const { lab, student } = parsePath(reportPath);
+  return join(dirname(reportPath), `ЛР${lab}_${student}.docx`);
 }
 
 function main() {
   const args = process.argv.slice(2);
-  const since = args.find(arg => arg.startsWith('--since='))?.slice('--since='.length);
+  const option = name => args.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const since = option('since');
+  const filesFrom = option('files-from');
+  const list = option('list');
 
-  const targets = args.includes('--changed')
-    ? changedReports(since)
-    : args.filter(arg => !arg.startsWith('--')).map(arg => join(ROOT, arg));
+  const targets = args.includes('--all')
+    ? allReports()
+    : filesFrom
+      ? reportsOf(readFileSync(filesFrom, 'utf8').split('\n'))
+      : args.includes('--changed')
+        ? changedReports(since)
+        : args.filter(arg => !arg.startsWith('--')).map(arg => join(ROOT, arg));
 
   if (!targets.length) {
     console.log('No changed reports.');
     return;
   }
 
+  const summary = [];
   for (const target of targets) {
+    const name = relative(ROOT, target);
     try {
-      buildReport(target);
+      const built = buildReport(target);
+      const files = built ? [built.docx, built.pdf].filter(Boolean) : [];
+      summary.push(built
+        ? `| ✅ | \`${name}\` | ${files.map(file => basename(file)).join(', ')} |`
+        : `| ➖ | \`${name}\` | заготовка, не збирається |`);
+      // CI collects what was built — and only that — for the preview
+      for (const file of list ? files : []) writeFileSync(list, `${relative(ROOT, file)}\n`, { flag: 'a' });
     } catch (error) {
-      fail(`${relative(ROOT, target)}: ${error.message}`);
+      fail(`${name}: ${error.message}`);
+      summary.push(`| ❌ | \`${name}\` | ${error.message.split('\n').join('<br>')} |`);
+
+      // A document left over from an earlier build no longer matches the
+      // report — better no document than a wrong one
+      try {
+        for (const stale of [outputOf(target), pdfOf(outputOf(target))]) {
+          if (existsSync(stale)) {
+            rmSync(stale);
+            console.error(`[error] removed ${relative(ROOT, stale)}: it no longer matches the report`);
+          }
+        }
+      } catch { /* a malformed path has no document */ }
     }
+  }
+
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    writeFileSync(process.env.GITHUB_STEP_SUMMARY,
+      ['### Звіти', '', '| | Звіт | Результат |', '|---|---|---|', ...summary, ''].join('\n'),
+      { flag: 'a' });
   }
 }
 
-main();
+// Run as a script; imported (by the checks) only the helpers are wanted
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

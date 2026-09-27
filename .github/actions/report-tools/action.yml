@@ -1,0 +1,50 @@
+name: Report tools
+description: >-
+  Everything a student report is built and checked with: Node, Pandoc pinned to
+  the local version, xmllint, LibreOffice for the PDF, the fonts of the samples
+  and poppler to check the PDF.
+
+inputs:
+  pandoc-version:
+    description: Pandoc release to install
+    default: '3.11'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Pandoc, LibreOffice, fonts and checkers
+      shell: bash
+      env:
+        PANDOC_VERSION: ${{ inputs.pandoc-version }}
+      run: |
+        # Ubuntu's own Pandoc is older and writes tables differently
+        curl -fsSL --retry 3 -o "$RUNNER_TEMP/pandoc.deb" \
+          "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+
+        # The installer downloads Times New Roman and Courier New itself, after
+        # the licence is accepted — from SourceForge, which fails now and then
+        echo 'ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true' \
+          | sudo debconf-set-selections
+
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends \
+          "$RUNNER_TEMP/pandoc.deb" libxml2-utils poppler-utils libreoffice-writer-nogui fontconfig
+
+        for attempt in 1 2 3; do
+          sudo apt-get install -y -qq --reinstall ttf-mscorefonts-installer && \
+            fc-list | grep -q 'Times New Roman' && fc-list | grep -q 'Courier New' && break
+          echo "fonts not installed, attempt $attempt"; sleep 10
+        done
+        sudo fc-cache -f
+
+        # Without the fonts of the sample LibreOffice substitutes others, and
+        # lines and pages break differently from Word — better to stop here
+        fc-list | grep -q 'Times New Roman' || { echo "::error::Times New Roman is not installed"; exit 1; }
+        fc-list | grep -q 'Courier New'     || { echo "::error::Courier New is not installed"; exit 1; }
+
+        pandoc --version | head -1
+        soffice --version

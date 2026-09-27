@@ -1,0 +1,107 @@
+{
+  "_comment": "Склад групи. Номер визначає шифр роботи на титулці (ФКЗЕ. 121ПМЗІ<номер>). Поле github студент вписує сам окремим пул-реквестом.",
+  "group": "pz-23-1-9",
+  "title": "ПЗ-23-1/9",
+  "students": [
+    {
+      "number": 1,
+      "name": "Багацька Валерія",
+      "github": null
+    },
+    {
+      "number": 2,
+      "name": "Білошапка Олександр",
+      "github": "Raven09503"
+    },
+    {
+      "number": 3,
+      "name": "Гайдар Павло",
+      "github": "Justpasha1"
+    },
+    {
+      "number": 4,
+      "name": "Єфімов Єгор",
+      "github": null
+    },
+    {
+      "number": 5,
+      "name": "Захарчук Юрій Олексійович",
+      "github": "NeYurii"
+    },
+    {
+      "number": 6,
+      "name": "Іващенко Михайл",
+      "github": null
+    },
+    {
+      "number": 7,
+      "name": "Кесь Максим",
+      "github": null
+    },
+    {
+      "number": 8,
+      "name": "Макаренко Анастасія",
+      "github": "theprofessorpsycho"
+    },
+    {
+      "number": 9,
+      "name": "Наливайко Андрій",
+      "github": "andrey-772"
+    },
+    {
+      "number": 10,
+      "name": "Олійник Артем",
+      "github": null
+    },
+    {
+      "number": 11,
+      "name": "Політаєв Ярослав",
+      "github": null
+    },
+    {
+      "number": 12,
+      "name": "Попович Надія",
+      "github": null
+    },
+    {
+      "number": 13,
+      "name": "Пiдгорний Тимур",
+      "github": null
+    },
+    {
+      "number": 14,
+      "name": "Сельодкіна Катерина",
+      "github": null
+    },
+    {
+      "number": 15,
+      "name": "Скоропад Вадим",
+      "github": null
+    },
+    {
+      "number": 16,
+      "name": "Сокол Ігор",
+      "github": "XxAlohadancexX"
+    },
+    {
+      "number": 17,
+      "name": "Сухоносов Ілля",
+      "github": null
+    },
+    {
+      "number": 18,
+      "name": "Чернишов Максим",
+      "github": null
+    },
+    {
+      "number": 19,
+      "name": "Шерстюк Євген",
+      "github": null
+    },
+    {
+      "number": 20,
+      "name": "Ягода Богдан",
+      "github": null
+    }
+  ]
+}

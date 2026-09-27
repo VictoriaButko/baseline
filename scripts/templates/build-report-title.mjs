@@ -53,6 +53,31 @@ const COURSES = [
 // carries an image; the generated title page does not include it
 const NOTE = '4 пробіл, нижнє підкреслення';
 
+// The sample is a Google Docs export: every paragraph carries w14:paraId, whose
+// namespace lives on the <w:document> of the sample. Inlined into a Pandoc
+// document that declares no w14, the attribute makes document.xml malformed and
+// Word refuses the file. The rsid attributes are all zeros and mean nothing.
+const stripAttributes = xml => xml.replace(/\s(?:w14:\w+|w:rsid\w*)="[^"]*"/g, '');
+
+/**
+ * The sample's note asks for four spaces and then the name underlined, the way
+ * the group and the teacher are. The name is split into a run of its own that
+ * repeats the formatting of the label and adds the underline.
+ */
+function underlineStudent(body) {
+  const run = /<w:r>(<w:rPr>(?:(?!<\/w:rPr>)[\s\S])*<\/w:rPr>)<w:t xml:space="preserve">(Студент\s+){{student}}<\/w:t><\/w:r>/;
+  if (!run.test(body)) throw new Error('no run "Студент {{student}}" to underline');
+
+  return body.replace(run, (match, properties, label) => {
+    // the schema orders rPr children: <w:u> comes after the size and before <w:rtl>
+    const underlined = properties.includes('<w:rtl')
+      ? properties.replace('<w:rtl', '<w:u w:val="single"/><w:rtl')
+      : properties.replace('</w:rPr>', '<w:u w:val="single"/></w:rPr>');
+    return `<w:r>${properties}<w:t xml:space="preserve">${label}</w:t></w:r>` +
+      `<w:r>${underlined}<w:t xml:space="preserve">{{student}}</w:t></w:r>`;
+  });
+}
+
 const header = source => `<!--
   Title page of a lab report.
 
@@ -80,11 +105,12 @@ function buildTitle({ id, source, substitutions }) {
       throw new Error(`${source}: an image is left in the title page — it cannot be inlined this way`);
     }
 
-    let body = kept.join('\n');
+    let body = stripAttributes(kept.join('\n'));
     for (const [from, to] of substitutions) {
       if (!body.includes(from)) throw new Error(`${source}: no line "${from}"`);
       body = body.replaceAll(from, to);
     }
+    body = underlineStudent(body);
 
     const output = join(__dirname, `report-title-${id}.xml`);
     writeFileSync(output, header(source) + body + '\n');

@@ -26,27 +26,50 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 
-import { freezeTimestamps } from '../lib/docx.mjs';
+import { freezeTimestamps, packDocx } from '../lib/docx.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // The earliest a zip entry can be dated; the value itself carries no meaning
 const EPOCH = Date.UTC(1980, 0, 1) / 1000;
 
-// The two documents differ only in margins and line spacing:
-//   lab    — guides, margins 20/14.2/20/28.4 mm, line 1.3
-//   report — student report, margins 20/10/20/25 mm, line 1.5
-//            (data/Зразок оформлення для звіту.docx.pdf)
+// A blank line of the report sample — "1 Enter (2 міжрядковий інтервал)" in its
+// notes: one empty paragraph of Times New Roman 14pt at line 1.5, 24pt high
+const BLANK_LINE = 480;
+
+// The two documents follow different samples:
+//   lab    — guides (data/ЛР1_ОС_Середовище_Windows.docx and the others):
+//            margins 20/14.2/20/28.4 mm, line 1.3, indent 1.25 cm, captions
+//            centred, header row of a table in bold, no page numbers
+//   report — student report (data/Зразок оформлення для звіту.docx):
+//            margins 20/10/20/25 mm, line 1.5, indent 1 cm, a blank line
+//            around headings and figures, table caption flush left with the
+//            indent, header row of a table in plain type, the page number in
+//            the top right corner of every page but the title page
 const PROFILES = {
   lab: {
     output: 'lab-template.docx',
     line: 312,
-    margins: { top: 1134, right: 851, bottom: 1134, left: 1418 }
+    margins: { top: 1134, right: 851, bottom: 1134, left: 1418 },
+    indent: 709,
+    heading: { before: 240, after: 120 },
+    figure: { before: 160, between: 60, caption: 60, after: 160 },
+    tableCaption: { before: 160, after: 60, jc: 'center', ind: '<w:ind w:firstLine="0"/>' },
+    tableHeaderBold: true,
+    pageNumbers: false
   },
   report: {
     output: 'report-template.docx',
     line: 360,
-    margins: { top: 1134, right: 567, bottom: 1134, left: 1418 }
+    margins: { top: 1134, right: 567, bottom: 1134, left: 1418 },
+    indent: 567,
+    heading: { before: BLANK_LINE, after: BLANK_LINE },
+    figure: { before: BLANK_LINE, between: BLANK_LINE, caption: 0, after: BLANK_LINE },
+    // "Таблиця 1 – Назва" starts at the paragraph indent, and a second line of
+    // a long name continues under the name rather than under "Таблиця"
+    tableCaption: { before: BLANK_LINE, after: 0, jc: 'left', ind: '<w:ind w:left="2127" w:hanging="1560"/>' },
+    tableHeaderBold: false,
+    pageNumbers: true
   }
 };
 
@@ -58,8 +81,8 @@ const BODY_SIZE = 28;   // 14pt
 const TABLE_SIZE = 24;  // 12pt
 const CODE_SIZE = 18;   // 9pt
 let LINE = 312;         // line spacing of the profile being built
+let PROFILE = PROFILES.lab;  // the profile being built
 const CODE_LINE = 200;  // single spacing in code blocks
-const INDENT = 709;     // 1.25 cm first line indent
 const LIST_LEFT = 1134; // 2 cm — used by BlockText
 const CODE_WRAP = 340;  // offset of a wrapped code line, so it is not read as the next line
 const CODE_PAD = 113;   // 0.2 cm between the frame of a listing and its text
@@ -85,7 +108,7 @@ const sectionHeading = (id, name, before, after) => `
 // Paragraph style: left bold subsection heading ("1 Основні поняття", "Крок 1. ...")
 const subHeading = (id, name, before) => `
 <w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/><w:basedOn w:val="Normal"/><w:next w:val="FirstParagraph"/><w:qFormat/>
-<w:pPr><w:keepNext/>${spacing(before, 0, LINE)}<w:ind w:firstLine="${INDENT}"/><w:jc w:val="left"/></w:pPr>
+<w:pPr><w:keepNext/>${spacing(before, 0, LINE)}<w:ind w:firstLine="${PROFILE.indent}"/><w:jc w:val="left"/></w:pPr>
 <w:rPr>${fonts(BODY_FONT)}<w:b/><w:bCs/><w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/></w:rPr></w:style>`;
 
 const buildStyles = () => ({
@@ -95,7 +118,7 @@ const buildStyles = () => ({
 
   BodyText: `
 <w:style w:type="paragraph" w:styleId="BodyText"><w:name w:val="Body Text"/><w:basedOn w:val="Normal"/><w:qFormat/>
-<w:pPr>${spacing(0, 0, LINE)}<w:ind w:firstLine="${INDENT}"/><w:jc w:val="both"/></w:pPr></w:style>`,
+<w:pPr>${spacing(0, 0, LINE)}<w:ind w:firstLine="${PROFILE.indent}"/><w:jc w:val="both"/></w:pPr></w:style>`,
 
   FirstParagraph: `
 <w:style w:type="paragraph" w:customStyle="1" w:styleId="FirstParagraph"><w:name w:val="First Paragraph"/><w:basedOn w:val="BodyText"/><w:next w:val="BodyText"/><w:qFormat/></w:style>`,
@@ -118,8 +141,8 @@ const buildStyles = () => ({
 <w:pPr>${spacing(0, 240, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>
 <w:rPr>${fonts(BODY_FONT)}<w:b/><w:bCs/><w:caps/><w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/></w:rPr></w:style>`,
 
-  Heading1: sectionHeading('Heading1', 'heading 1', 240, 120),
-  Heading2: sectionHeading('Heading2', 'heading 2', 240, 120),
+  Heading1: sectionHeading('Heading1', 'heading 1', PROFILE.heading.before, PROFILE.heading.after),
+  Heading2: sectionHeading('Heading2', 'heading 2', PROFILE.heading.before, PROFILE.heading.after),
   Heading3: subHeading('Heading3', 'heading 3', 140),
   Heading4: subHeading('Heading4', 'heading 4', 120),
   Heading5: subHeading('Heading5', 'heading 5', 120),
@@ -160,17 +183,30 @@ const buildStyles = () => ({
   // "Таблиця 1 — ..." above a table
   TableCaption: `
 <w:style w:type="paragraph" w:customStyle="1" w:styleId="TableCaption"><w:name w:val="Table Caption"/><w:basedOn w:val="Normal"/><w:next w:val="FirstParagraph"/><w:qFormat/>
-<w:pPr><w:keepNext/>${spacing(160, 60, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>
+<w:pPr><w:keepNext/>${spacing(PROFILE.tableCaption.before, PROFILE.tableCaption.after, LINE)}${PROFILE.tableCaption.ind}<w:jc w:val="${PROFILE.tableCaption.jc}"/></w:pPr>
 <w:rPr>${fonts(BODY_FONT)}<w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/></w:rPr></w:style>`,
 
   ImageCaption: `
 <w:style w:type="paragraph" w:customStyle="1" w:styleId="ImageCaption"><w:name w:val="Image Caption"/><w:basedOn w:val="Normal"/><w:next w:val="FirstParagraph"/><w:qFormat/>
-<w:pPr>${spacing(60, 160, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>
+<w:pPr>${spacing(PROFILE.figure.caption, PROFILE.figure.after, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr>
 <w:rPr>${fonts(BODY_FONT)}<w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/></w:rPr></w:style>`,
 
+  // The picture itself; the air between it and its caption is its own
   Figure: `
 <w:style w:type="paragraph" w:customStyle="1" w:styleId="Figure"><w:name w:val="Figure"/><w:basedOn w:val="Normal"/><w:next w:val="ImageCaption"/><w:qFormat/>
-<w:pPr><w:keepNext/>${spacing(160, 60, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr></w:style>`,
+<w:pPr><w:keepNext/>${spacing(PROFILE.figure.before, PROFILE.figure.between, LINE)}<w:ind w:firstLine="0"/><w:jc w:val="center"/></w:pPr></w:style>`,
+
+  // "Висновок: ..." — the report sample runs the conclusion into its first
+  // paragraph rather than giving it a heading, and sets it off by a blank line
+  Conclusion: `
+<w:style w:type="paragraph" w:customStyle="1" w:styleId="Conclusion"><w:name w:val="Conclusion"/><w:basedOn w:val="BodyText"/><w:next w:val="BodyText"/><w:qFormat/>
+<w:pPr><w:keepNext/>${spacing(PROFILE.heading.before, 0, LINE)}</w:pPr></w:style>`,
+
+  // Page number in the header, top right, as in the report sample
+  Header: `
+<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:qFormat/>
+<w:pPr>${spacing(0, 0, 240)}<w:ind w:firstLine="0"/><w:jc w:val="right"/></w:pPr>
+<w:rPr>${fonts(BODY_FONT)}<w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/></w:rPr></w:style>`,
 
   BlockText: `
 <w:style w:type="paragraph" w:styleId="BlockText"><w:name w:val="Block Text"/><w:basedOn w:val="BodyText"/><w:qFormat/>
@@ -182,18 +218,74 @@ const buildStyles = () => ({
 <w:rPr>${fonts(BODY_FONT)}<w:sz w:val="${TABLE_SIZE}"/><w:szCs w:val="${TABLE_SIZE}"/></w:rPr>
 <w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblBorders>${allBorders}</w:tblBorders>
 <w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="70" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="70" w:type="dxa"/></w:tblCellMar></w:tblPr>
-<w:tblStylePr w:type="firstRow"><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/><w:bCs/></w:rPr>
+<w:tblStylePr w:type="firstRow"><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr>${PROFILE.tableHeaderBold ? '<w:b/><w:bCs/>' : ''}</w:rPr>
 <w:tcPr><w:vAlign w:val="center"/></w:tcPr></w:tblStylePr></w:style>`,
 });
 
 const docDefaults = () => `<w:docDefaults><w:rPrDefault><w:rPr>${fonts(BODY_FONT)}<w:sz w:val="${BODY_SIZE}"/><w:szCs w:val="${BODY_SIZE}"/><w:lang w:val="uk-UA"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr>${spacing(0, 0, LINE)}</w:pPr></w:pPrDefault></w:docDefaults>`;
 
-// A4 with the margins of the selected profile
-const sectPr = ({ top, right, bottom, left }) =>
-  `<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/>` +
+// A4 with the margins of the selected profile.
+//
+// A report numbers its pages the way the sample does: the title page is page 1
+// and shows no number (titlePg gives it the empty first-page header), every
+// following page has the number in the top right corner, 4 mm from the edge.
+// Pandoc carries the headers of the reference document over into the output.
+const sectPr = ({ margins: { top, right, bottom, left }, pageNumbers }) =>
+  `<w:sectPr>` +
+  (pageNumbers
+    ? `<w:headerReference w:type="default" r:id="rIdHeaderPage"/>` +
+      `<w:headerReference w:type="first" r:id="rIdHeaderFirst"/>`
+    : '') +
+  `<w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/>` +
   `<w:pgMar w:top="${top}" w:right="${right}" w:bottom="${bottom}" w:left="${left}" ` +
-  `w:header="708" w:footer="708" w:gutter="0"/>` +
-  `<w:pgNumType w:start="1"/><w:docGrid w:linePitch="360"/></w:sectPr>`;
+  `w:header="${pageNumbers ? 227 : 708}" w:footer="708" w:gutter="0"/>` +
+  `<w:pgNumType w:start="1"/>${pageNumbers ? '<w:titlePg/>' : ''}<w:docGrid w:linePitch="360"/></w:sectPr>`;
+
+const HEADER_NS =
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+
+const HEADERS = {
+  'header-page.xml': {
+    id: 'rIdHeaderPage',
+    xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr ${HEADER_NS}>` +
+      '<w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="right"/></w:pPr>' +
+      '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+      '<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+      '<w:r><w:t>2</w:t></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:hdr>'
+  },
+  'header-first.xml': {
+    id: 'rIdHeaderFirst',
+    xml: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr ${HEADER_NS}>` +
+      '<w:p><w:pPr><w:pStyle w:val="Header"/></w:pPr></w:p></w:hdr>'
+  }
+};
+
+const HEADER_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml';
+const HEADER_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/header';
+
+/** Writes the page-number headers into an unpacked reference document */
+function addHeaders(docx) {
+  const typesPath = join(docx, '[Content_Types].xml');
+  const relsPath = join(docx, 'word', '_rels', 'document.xml.rels');
+  let types = readFileSync(typesPath, 'utf8');
+  let rels = readFileSync(relsPath, 'utf8');
+
+  for (const [file, { id, xml }] of Object.entries(HEADERS)) {
+    writeFileSync(join(docx, 'word', file), xml);
+    if (!types.includes(`/word/${file}`)) {
+      types = types.replace('</Types>', `<Override PartName="/word/${file}" ContentType="${HEADER_TYPE}"/></Types>`);
+    }
+    if (!rels.includes(`Id="${id}"`)) {
+      rels = rels.replace('</Relationships>', `<Relationship Id="${id}" Type="${HEADER_REL}" Target="${file}"/></Relationships>`);
+    }
+  }
+
+  writeFileSync(typesPath, types);
+  writeFileSync(relsPath, rels);
+}
 
 // --- build -----------------------------------------------------------------
 
@@ -226,6 +318,7 @@ function patchStyles(xml) {
 
 function buildTemplate(profile) {
   LINE = profile.line;
+  PROFILE = profile;
 
   const work = mkdtempSync(join(tmpdir(), 'reference-docx-'));
 
@@ -242,9 +335,11 @@ function buildTemplate(profile) {
     const docPath = join(work, 'docx', 'word', 'document.xml');
     const document = readFileSync(docPath, 'utf8').replace(
       /<w:sectPr[\s\S]*?<\/w:sectPr>/,
-      sectPr(profile.margins)
+      sectPr(profile)
     );
     writeFileSync(docPath, document);
+
+    if (profile.pageNumbers) addHeaders(join(work, 'docx'));
 
     // A .docx is a zip, and a zip stores the modification time of every entry.
     // Without freezing them a rebuild of an unchanged template differs byte for
@@ -258,7 +353,7 @@ function buildTemplate(profile) {
 
     const output = join(__dirname, profile.output);
     const built = join(work, profile.output);
-    run('zip', ['-r', '-q', '-X', built, '.'], { cwd: join(work, 'docx') });
+    packDocx(join(work, 'docx'), built);
     copyFileSync(built, output);
 
     console.log(`[ok] ${output}`);

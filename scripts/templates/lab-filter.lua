@@ -10,6 +10,7 @@
       Word);
     * marks "Таблиця N — ..." / "Рисунок N — ..." paragraphs as captions so
       they are centred above the object instead of being justified body text;
+    * "double quotes" become «ялинки»;
     * lists and checkboxes keep the reader's own markers — their geometry is
       patched in scripts/generate-docx.js.
 ]]
@@ -29,6 +30,18 @@ local SKIPPED_SECTIONS = {
 local function is_skipped(header)
   local text = pandoc.utils.stringify(header):gsub('^%s*(.-)%s*$', '%1')
   return SKIPPED_SECTIONS[text] == true
+end
+
+--- "термін" → «термін»: Pandoc sets English quotes, Ukrainian text takes
+--- «ялинки». Single quotes stay — in the material they are character literals
+--- ('A') and apostrophes, not quotation
+function Quoted(quoted)
+  if quoted.quotetype ~= 'DoubleQuote' then return nil end
+
+  local inlines = pandoc.List({ pandoc.Str('«') })
+  inlines:extend(quoted.content)
+  inlines:insert(pandoc.Str('»'))
+  return inlines
 end
 
 --- "Таблиця 1 — Відповідність команд" → centred caption above the table

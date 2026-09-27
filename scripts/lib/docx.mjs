@@ -9,8 +9,8 @@
  */
 
 import { spawnSync } from 'child_process';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { join, relative } from 'path';
 import { tmpdir } from 'os';
 
 // Pandoc reader and writer options shared by every conversion.
@@ -22,6 +22,39 @@ export const PANDOC_ARGS = [
   '--standalone',
   '--no-highlight'
 ];
+
+/**
+ * Environment of touch and zip. A zip entry stores its time as local time,
+ * so the same document packed in Kyiv and on a CI runner (UTC) differed by the
+ * hours between them. Packing always in UTC gives the same bytes everywhere.
+ */
+export const ZIP_ENV = { ...process.env, TZ: 'UTC' };
+
+/**
+ * Packs an unpacked .docx directory into a zip that is the same bytes on every
+ * machine: entries in byte order of their names ([Content_Types].xml first, as
+ * Word expects), no directory entries, no extra attributes, times in UTC.
+ * zip -r lists a directory in the order the file system returns it, which is
+ * sorted on macOS and not on the ext4 of a CI runner.
+ */
+export function packDocx(directory, outputPath) {
+  const files = [];
+  const walk = (dir, prefix) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(join(dir, entry.name), name);
+      else files.push(name);
+    }
+  };
+  walk(directory, '');
+  files.sort((a, b) => (Buffer.compare(Buffer.from(a), Buffer.from(b))));
+
+  rmSync(outputPath, { force: true });
+  const result = spawnSync('zip', ['-q', '-X', '-D', outputPath, '-@'], {
+    cwd: directory, input: files.join('\n') + '\n', encoding: 'utf8', env: ZIP_ENV
+  });
+  if (result.status !== 0) throw new Error(`zip failed: ${result.stderr || result.stdout}`);
+}
 
 /** Runs a command, throwing on a non-zero exit status */
 export function run(command, args, options = {}) {
@@ -47,13 +80,177 @@ export function stretchTable(table, tableWidth) {
   scaled[scaled.length - 1] += tableWidth - scaled.reduce((sum, w) => sum + w, 0);
 
   let index = 0;
-  let out = table.replace(/<w:gridCol w:w="[\d.]+"\s*\/>/g, () => `<w:gridCol w:w="${scaled[index++]}"/>`);
+  const out = table.replace(/<w:gridCol w:w="[\d.]+"\s*\/>/g, () => `<w:gridCol w:w="${scaled[index++]}"/>`);
 
-  out = out.replace(/<w:tblW[^/]*\/>/, `<w:tblW w:type="dxa" w:w="${tableWidth}"/>`);
+  return out.replace(/<w:tblPr>([\s\S]*?)<\/w:tblPr>/, (match, inner) => {
+    let properties = setChild(inner, TBL_PR, 'tblW', `<w:tblW w:type="dxa" w:w="${tableWidth}"/>`);
+    if (!/<w:tblLayout\b/.test(properties)) {
+      properties = setChild(properties, TBL_PR, 'tblLayout', '<w:tblLayout w:type="fixed"/>');
+    }
+    return `<w:tblPr>${properties}</w:tblPr>`;
+  });
+}
 
-  return out.includes('<w:tblLayout')
-    ? out
-    : out.replace('</w:tblPr>', '<w:tblLayout w:type="fixed"/></w:tblPr>');
+// Order of the children of <w:pPr> and <w:tblPr> in the OOXML schema. Word
+// reads a property written out of order as a damaged file, so an element is
+// inserted where the schema puts it rather than appended.
+const P_PR = [
+  'pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl', 'numPr',
+  'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens', 'kinsoku', 'wordWrap',
+  'overflowPunct', 'topLinePunct', 'autoSpaceDE', 'autoSpaceDN', 'bidi', 'adjustRightInd',
+  'snapToGrid', 'spacing', 'ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc',
+  'textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr',
+  'sectPr', 'pPrChange'
+];
+const TBL_PR = [
+  'tblStyle', 'tblpPr', 'tblOverlap', 'bidiVisual', 'tblStyleRowBandSize', 'tblStyleColBandSize',
+  'tblW', 'jc', 'tblCellSpacing', 'tblInd', 'tblBorders', 'shd', 'tblLayout', 'tblCellMar',
+  'tblLook', 'tblCaption', 'tblDescription', 'tblPrChange'
+];
+
+/** The top-level children of a properties element, as [name, xml] pairs */
+function children(inner) {
+  const out = [];
+  const pattern = /<w:(\w+)\b[^>]*?(?:\/>|>[\s\S]*?<\/w:\1>)/g;
+  for (const [xml, name] of inner.matchAll(pattern)) out.push([name, xml]);
+  return out;
+}
+
+/**
+ * Sets one child of a properties element: replaces it when present, otherwise
+ * inserts it at its place in the schema order. The other children keep their
+ * order — and are put in schema order too if Pandoc wrote them out of it.
+ */
+export function setChild(inner, order, name, xml) {
+  const rank = child => {
+    const position = order.indexOf(child);
+    return position === -1 ? order.length : position;
+  };
+  const list = children(inner).filter(([child]) => child !== name);
+  list.push([name, xml]);
+  return list
+    .map((entry, index) => [...entry, index])
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || a[2] - b[2])
+    .map(([, child]) => child)
+    .join('');
+}
+
+/**
+ * Sets the tables of the document (Pandoc's "Table" style — listings are framed
+ * later and are not touched) the way the samples print them.
+ *
+ * Every cell paragraph gets single spacing. Pandoc gives cell paragraphs the
+ * Compact style, and a paragraph style outranks the table style, so the single
+ * spacing of the Table style never reached the cells: they were set at the
+ * 1.3 or 1.5 of the body text.
+ *
+ * The rest is optional, per document (the report sample):
+ *   align       — the table itself, "center"
+ *   headerAlign — the header row; Pandoc writes the column alignment into every
+ *                 cell, which outranks the centring of the table style
+ *   rowHeight   — minimum height of a row, twips
+ */
+export function formatTable(table, { align, headerAlign, rowHeight } = {}) {
+  if (!/<w:tblStyle w:val="Table"\s*\/>/.test(table)) return table;
+
+  const single = '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>';
+
+  const paragraph = (xml, extra = []) => xml
+    .replace(/<w:p>(?!<w:pPr>)/g, '<w:p><w:pPr></w:pPr>')
+    .replace(/<w:pPr>([\s\S]*?)<\/w:pPr>/g, (match, inner) => {
+      let properties = /<w:spacing\b/.test(inner) ? inner : setChild(inner, P_PR, 'spacing', single);
+      for (const [name, value] of extra) properties = setChild(properties, P_PR, name, value);
+      return `<w:pPr>${properties}</w:pPr>`;
+    });
+
+  let out = table.replace(/<w:tblPr>([\s\S]*?)<\/w:tblPr>/, (match, inner) =>
+    `<w:tblPr>${align ? setChild(inner, TBL_PR, 'jc', `<w:jc w:val="${align}"/>`) : inner}</w:tblPr>`
+  );
+
+  // Header row alignment is written into every cell: it outranks the table
+  // style, and some previewers read nothing else
+  out = out.replace(/<w:tr>([\s\S]*?)<\/w:tr>/g, (row, inner) => {
+    const header = /<w:tblHeader\b/.test(inner);
+    let cells = paragraph(inner, header && headerAlign ? [['jc', `<w:jc w:val="${headerAlign}"/>`]] : []);
+
+    if (rowHeight) {
+      const height = `<w:trHeight w:val="${rowHeight}"/>`;
+      cells = cells.includes('<w:trPr>')
+        ? cells.replace('<w:trPr>', `<w:trPr>${height}`)
+        : cells.includes('<w:trPr />') || cells.includes('<w:trPr/>')
+          ? cells.replace(/<w:trPr\s*\/>/, `<w:trPr>${height}</w:trPr>`)
+          : `<w:trPr>${height}</w:trPr>${cells}`;
+    }
+    return `<w:tr>${cells}</w:tr>`;
+  });
+
+  return out;
+}
+
+/**
+ * Checks the package before it is written: every XML part must be well formed,
+ * and every style and relationship the document refers to must exist.
+ *
+ * Word refuses a malformed part outright ("the file is corrupt") and quietly
+ * falls back to Normal for a style it cannot find, so either failure reaches
+ * the printed page. Better to fail the build and never commit such a file.
+ */
+export function validatePackage(directory) {
+  const parts = [];
+  const walk = dir => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(xml|rels)$/.test(entry.name)) parts.push(path);
+    }
+  };
+  walk(directory);
+
+  const lint = spawnSync('xmllint', ['--noout', ...parts], { encoding: 'utf8' });
+  if (lint.error) throw new Error('xmllint is not installed (libxml2-utils) — cannot check the document');
+  // Namespace errors (a prefix nobody declared) leave the exit status at 0 and
+  // are only printed — and they are exactly what made Word refuse a report
+  if (lint.status !== 0 || lint.stderr.trim()) {
+    const message = lint.stderr.split(directory + '/').join('').trim().split('\n').slice(0, 3).join('\n');
+    throw new Error(`malformed XML in the document:\n${message}`);
+  }
+
+  const read = path => existsSync(join(directory, path)) ? readFileSync(join(directory, path), 'utf8') : '';
+  const styles = new Set([...read('word/styles.xml').matchAll(/w:styleId="([^"]+)"/g)].map(m => m[1]));
+  const problems = [];
+
+  for (const part of parts.filter(path => /word\/(document|header\d*|header-\w+|footer\d*)\.xml$/.test(path))) {
+    const xml = readFileSync(part, 'utf8');
+    const name = relative(directory, part);
+
+    for (const [, kind, id] of xml.matchAll(/<w:(pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)) {
+      if (!styles.has(id)) problems.push(`${name}: ${kind} "${id}" is not defined in styles.xml`);
+    }
+
+    const relsPath = join('word', '_rels', `${name.split('/').pop()}.rels`);
+    const rels = new Set([...read(relsPath).matchAll(/Id="([^"]+)"/g)].map(m => m[1]));
+    for (const [, id] of xml.matchAll(/r:(?:id|embed|link)="([^"]+)"/g)) {
+      if (!rels.has(id)) problems.push(`${name}: relationship ${id} is missing from ${relsPath}`);
+    }
+  }
+
+  if (problems.length) {
+    throw new Error(`the document refers to what it does not contain:\n${[...new Set(problems)].join('\n')}`);
+  }
+}
+
+/** Writes the title and the author into docProps/core.xml */
+function setProperties(directory, { title, author } = {}) {
+  const path = join(directory, 'docProps', 'core.xml');
+  if (!existsSync(path) || (!title && !author)) return;
+
+  const escape = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const set = (xml, tag, value) => value === undefined ? xml : xml.replace(
+    new RegExp(`<${tag}\\s*/>|<${tag}>[^<]*</${tag}>`),
+    `<${tag}>${escape(value)}</${tag}>`
+  );
+
+  writeFileSync(path, set(set(readFileSync(path, 'utf8'), 'dc:title', title), 'dc:creator', author));
 }
 
 /**
@@ -75,10 +272,10 @@ export function freezeTimestamps(directory, epoch) {
   const pad = value => String(value).padStart(2, '0');
 
   // touch -t expects CCYYMMDDhhmm.ss
-  const formatted = `${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}` +
-                    `${pad(stamp.getHours())}${pad(stamp.getMinutes())}.${pad(stamp.getSeconds())}`;
+  const formatted = `${stamp.getUTCFullYear()}${pad(stamp.getUTCMonth() + 1)}${pad(stamp.getUTCDate())}` +
+                    `${pad(stamp.getUTCHours())}${pad(stamp.getUTCMinutes())}.${pad(stamp.getUTCSeconds())}`;
 
-  run('find', [directory, '-exec', 'touch', '-t', formatted, '{}', '+']);
+  run('find', [directory, '-exec', 'touch', '-t', formatted, '{}', '+'], { env: ZIP_ENV });
 }
 
 /**
@@ -167,7 +364,7 @@ function listingStyle(stylesXml) {
   };
 }
 
-export function applyReferenceFormatting(docxPath, { tableWidth, list, epoch }) {
+export function applyReferenceFormatting(docxPath, { tableWidth, list, table, properties, epoch }) {
   const work = mkdtempSync(join(tmpdir(), 'docx-format-'));
 
   try {
@@ -184,7 +381,8 @@ export function applyReferenceFormatting(docxPath, { tableWidth, list, epoch }) 
             ? properties.replace('</w:pPr>', '<w:jc w:val="both"/></w:pPr>')
             : properties
       )
-      .replace(/<w:tbl>[\s\S]*?<\/w:tblGrid>/g, table => stretchTable(table, tableWidth));
+      .replace(/<w:tbl>[\s\S]*?<\/w:tblGrid>/g, grid => stretchTable(grid, tableWidth))
+      .replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, whole => formatTable(whole, table));
 
     writeFileSync(documentPath, formatListings(document, { ...listing, width: tableWidth }));
 
@@ -206,7 +404,10 @@ export function applyReferenceFormatting(docxPath, { tableWidth, list, epoch }) 
         );
 
         out = out.replace(/<w:lvlText w:val="([^"]*)"\s*\/>/, (match, glyph) =>
-          isBullet && !CHECKBOXES.includes(glyph) ? `<w:lvlText w:val="${bullet}"/>` : match
+          // A blank glyph is Pandoc's marker for a paragraph that continues a
+          // list item (the answer under a numbered question): it has no bullet
+          // and must not get one
+          isBullet && !CHECKBOXES.includes(glyph) && glyph.trim() !== '' ? `<w:lvlText w:val="${bullet}"/>` : match
         );
 
         // Symbol / Wingdings are only there for Pandoc's own bullet glyphs
@@ -218,10 +419,15 @@ export function applyReferenceFormatting(docxPath, { tableWidth, list, epoch }) 
       writeFileSync(numberingPath, patched);
     }
 
+    setProperties(work, properties);
+    validatePackage(work);
+
     if (epoch) freezeTimestamps(work, epoch);
 
-    run('zip', ['-r', '-q', '-X', 'patched.docx', '.', '-x', 'patched.docx'], { cwd: work });
-    copyFileSync(join(work, 'patched.docx'), docxPath);
+    const packed = `${work}.docx`;
+    packDocx(work, packed);
+    copyFileSync(packed, docxPath);
+    rmSync(packed, { force: true });
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -250,7 +456,7 @@ export function sourceDateEpoch(sourcePath) {
 }
 
 /** Converts markdown to .docx against a reference document and patches the result */
-export function convert(inputPath, outputPath, { referenceDoc, filter, metadata = {}, layout, cwd, resourcePath, dateFrom }) {
+export function convert(inputPath, outputPath, { referenceDoc, filter, metadata = {}, layout, properties, cwd, resourcePath, dateFrom }) {
   const args = [inputPath, '-o', outputPath, ...PANDOC_ARGS, `--reference-doc=${referenceDoc}`];
 
   if (filter) args.push(`--lua-filter=${filter}`);
@@ -263,6 +469,26 @@ export function convert(inputPath, outputPath, { referenceDoc, filter, metadata 
 
   const epoch = sourceDateEpoch(dateFrom ?? inputPath);
 
-  run('pandoc', args, { cwd, env: { ...process.env, SOURCE_DATE_EPOCH: epoch } });
-  applyReferenceFormatting(outputPath, { ...layout, epoch });
+  const pandoc = spawnSync('pandoc', args, {
+    cwd, encoding: 'utf8', env: { ...process.env, SOURCE_DATE_EPOCH: epoch }
+  });
+  if (pandoc.error || pandoc.status !== 0) {
+    throw new Error(`pandoc failed: ${pandoc.error?.message ?? pandoc.stderr}`);
+  }
+
+  // A picture Pandoc cannot read is replaced by its alt text and only warned
+  // about — the document would go out without it
+  const missing = pandoc.stderr.split('\n').filter(line => /Could not (fetch|find|read|determine)/i.test(line));
+  if (missing.length) {
+    rmSync(outputPath, { force: true });
+    throw new Error(`pandoc could not embed a resource:\n${missing.join('\n')}`);
+  }
+
+  try {
+    applyReferenceFormatting(outputPath, { ...layout, properties, epoch });
+  } catch (error) {
+    // an invalid document must not be left behind to be committed
+    rmSync(outputPath, { force: true });
+    throw error;
+  }
 }
