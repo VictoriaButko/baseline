@@ -1,52 +1,172 @@
 name: Student reports
 
-# The build is tied to accepting the work rather than to student pushes: the
-# .docx is produced when a pull request is merged into the lab branch.
+# A report's .docx is built at two moments.
 #
-# paths is narrowed to report.md on purpose — the pipeline commits the .docx into
-# that same branch, and without the filter it would retrigger itself.
+# 1. Preview — on every pull request into a lab or report branch: when it is
+#    opened, when the student pushes to it, and when it is reopened. The
+#    reports the pull request touches are built from the merge ref, the very
+#    tree a squash would produce — the .docx and its PDF — checked against the
+#    samples, and attached to the run as an artifact to download. Nothing is committed: pull requests
+#    come from forks too, and a fork cannot be written to. To render the
+#    documents again — after the pipeline itself changed, say — close the pull
+#    request and reopen it.
+#
+# 2. Publish — when the pull request is merged: the same reports are built on
+#    the branch it was merged into, and the documents are committed there. A
+#    report that fails the checks gets no document, and the run turns red.
+#
+# The publish job runs on pull_request_target: it needs write access even when
+# the pull request came from a fork, and it only ever checks out the base branch
+# after the merge — code the teacher has already accepted.
+#
+# GitHub takes a pull_request_target workflow from the default branch, not from
+# the base of the pull request (since December 2025), so this file has to be on
+# main for the publish job to run at all. The job itself checks out the branch
+# the pull request was merged into and runs that branch's scripts. The preview
+# job, on pull_request, runs the copy in the merge tree.
+#
+# workflow_dispatch rebuilds the documents of a branch by hand: every report in
+# it, or the ones listed.
+
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
     branches:
       - 'lab/**'
-    paths:
-      - 'reports/**/report.md'
+      - 'report/**'
+  pull_request_target:
+    types: [closed]
+    branches:
+      - 'lab/**'
+      - 'report/**'
+  workflow_dispatch:
+    inputs:
+      reports:
+        description: 'Paths of report.md, space-separated. Empty — every report of the branch.'
+        required: false
+        default: ''
 
-permissions:
-  contents: write
+env:
+  # Every report gets its PDF here; a report whose PDF cannot be made or fails
+  # the checks has neither document. Tools: .github/actions/report-tools.
+  REPORTS_REQUIRE_PDF: '1'
 
 jobs:
-  build:
-    name: Build .docx from reports
+  preview:
+    name: Preview .docx
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # history is needed: only changed reports are built
+          fetch-depth: 0          # the base commit is needed for the diff
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      - uses: ./.github/actions/report-tools
 
-      - name: Install Pandoc
+      - name: Build the reports of this pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y pandoc
+          # HEAD is the merge ref: what the base branch will hold after a merge
+          git diff --name-only "$BASE" HEAD > "$RUNNER_TEMP/files.txt"
+          node scripts/build-report-docx.mjs \
+            --files-from="$RUNNER_TEMP/files.txt" --list="$RUNNER_TEMP/built.txt"
 
-      - name: Build reports
-        run: node scripts/build-report-docx.mjs --changed --since="${{ github.event.before }}"
+      - name: Collect the documents
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/docx"
+          if [ -f "$RUNNER_TEMP/built.txt" ]; then
+            while IFS= read -r path; do cp -- "$path" "$RUNNER_TEMP/docx/"; done < "$RUNNER_TEMP/built.txt"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-pr-${{ github.event.pull_request.number }}
+          path: |
+            ${{ runner.temp }}/docx/*.docx
+            ${{ runner.temp }}/docx/*.pdf
+          if-no-files-found: ignore
+          retention-days: 30
+
+  publish:
+    name: Build and commit .docx
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    concurrency:
+      # one writer per branch; a second merge waits instead of racing the push
+      group: reports-publish-${{ github.event.pull_request.base.ref || github.ref_name }}
+      cancel-in-progress: false
+    env:
+      BRANCH: ${{ github.event.pull_request.base.ref || github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BRANCH }}
+          fetch-depth: 0          # the date of a document is the date of its last commit
+
+      - uses: ./.github/actions/report-tools
+
+      - name: Build the reports
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          REPORTS: ${{ inputs.reports }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
+            # the files of the pull request, whatever way it was merged
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$NUMBER/files" --paginate --jq '.[].filename' \
+              > "$RUNNER_TEMP/files.txt"
+            set -- --files-from="$RUNNER_TEMP/files.txt"
+          elif [ -n "$REPORTS" ]; then
+            set -- $REPORTS
+          else
+            set -- --all
+          fi
+
+          node scripts/build-report-docx.mjs "$@" || echo "failed=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit the documents
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add -- 'reports/**/*.docx'
+          # Built documents, and the ones removed because their report no
+          # longer builds. A document is reproducible: rebuilding an unchanged
+          # report gives back the same bytes — the PDF too, its time stamps
+          # are fixed — and there is nothing to commit.
+          git add -A -- ':(glob)reports/**/*.docx' ':(glob)reports/**/*.pdf'
           if git diff --cached --quiet; then
-            echo "No new documents."
+            echo "The documents are unchanged."
             exit 0
           fi
 
-          git commit -m "Reports: build .docx [skip ci]"
-          git push origin HEAD:"${GITHUB_REF_NAME}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            git commit -m "Reports: build .docx for #${{ github.event.pull_request.number }} [skip ci]"
+          else
+            git commit -m "Reports: rebuild .docx [skip ci]"
+          fi
+
+          # another merge may have landed meanwhile — rebase onto it and retry
+          for attempt in 1 2 3; do
+            git push origin HEAD:"$BRANCH" && exit 0
+            git pull --rebase origin "$BRANCH"
+          done
+          exit 1
+
+      - name: Fail on reports that did not build
+        if: steps.build.outputs.failed == 'true'
+        run: |
+          echo "::error::Some reports failed the checks and have no document — see the build step and the run summary."
+          exit 1
