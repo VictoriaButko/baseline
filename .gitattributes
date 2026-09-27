@@ -1,0 +1,2 @@
+# Encrypted quiz answer keys: a line diff of ciphertext means nothing
+*.answers.age -diff

@@ -1,0 +1,25 @@
+name: Answer keys
+
+# The repository is public: a quiz answer key may be committed only encrypted.
+# The check needs neither the secret key nor npm ci.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: No plaintext answer keys
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check
+        run: node scripts/answers-crypt.mjs check

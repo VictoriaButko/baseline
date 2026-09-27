@@ -52,6 +52,33 @@ follow "take sha256 from lab 7". The same command checks markup defects that hav
 bitten before: Cyrillic inside Latin words, hashes of the wrong length, ragged
 ASCII frames.
 
+## Quiz answer keys
+
+The answer key of a quiz lies next to its lecture as `<lecture>.answers`. The
+repository is public, so git ignores the plaintext and tracks
+`<lecture>.answers.age` — the same file encrypted with
+[age](https://age-encryption.org) to the public key in `.age-recipients`.
+
+The secret key is in Passwords (entry "baseline — quiz answers key"). On a new
+machine it is copied out of there once, and every worktree finds it in
+`~/.config/baseline/answers.key`:
+
+```bash
+pbpaste | npm run answers:import-key   # or $BASELINE_AGE_KEY for a one-off run
+npm run answers:decrypt                # *.answers.age → *.answers
+# edit the answers
+npm run answers:encrypt                # changed files only, then commit the .age
+npm run answers:status                 # what is not encrypted yet
+```
+
+`decrypt` never overwrites an answer key with local edits that are not encrypted
+yet; `--force` does. CI runs `npm run answers:check` on every push: it fails on a
+tracked plaintext answer key or a secret key anywhere in the repository.
+
+The ciphertext stays in git history for good. If the secret key leaks, a new key
+protects only future edits — the leaked answers can be fixed only by changing the
+questions.
+
 ## Documents
 
 Both pipelines share `scripts/lib/docx.mjs`: Pandoc plus the post-processing that
