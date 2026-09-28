@@ -1,0 +1,132 @@
+{
+  "_comment": "Склад групи. Номер визначає шифр роботи на титулці (ФКЗЕ. 121ОС<номер>). Поле github студент вписує сам окремим пул-реквестом.",
+  "group": "pz-24-1-9",
+  "title": "ПЗ-24-1/9",
+  "students": [
+    {
+      "number": 1,
+      "name": "Артеменко Микита",
+      "github": null
+    },
+    {
+      "number": 2,
+      "name": "Астіонов Максим",
+      "github": null
+    },
+    {
+      "number": 3,
+      "name": "Бабенко Ростислав",
+      "github": null
+    },
+    {
+      "number": 4,
+      "name": "Безвенюк Костянтин",
+      "github": null
+    },
+    {
+      "number": 5,
+      "name": "Березка Арсеній",
+      "github": null
+    },
+    {
+      "number": 6,
+      "name": "Гриженко Ярослав",
+      "github": null
+    },
+    {
+      "number": 7,
+      "name": "Данілов Кирило",
+      "github": null
+    },
+    {
+      "number": 8,
+      "name": "Криворучко Владислав",
+      "github": "Karkario"
+    },
+    {
+      "number": 9,
+      "name": "Кукушкін Антон",
+      "github": "Raxitosik"
+    },
+    {
+      "number": 10,
+      "name": "Кулак Ярослав",
+      "github": null
+    },
+    {
+      "number": 11,
+      "name": "Лапік Олександр",
+      "github": "Sashalpk"
+    },
+    {
+      "number": 12,
+      "name": "Лук’янов Артем",
+      "github": null
+    },
+    {
+      "number": 13,
+      "name": "Матвієнко Владислав",
+      "github": null
+    },
+    {
+      "number": 14,
+      "name": "Палеха Анна",
+      "github": null
+    },
+    {
+      "number": 15,
+      "name": "Ребець Дмитро",
+      "github": null
+    },
+    {
+      "number": 16,
+      "name": "Рісухін Лев",
+      "github": "kakady8362"
+    },
+    {
+      "number": 17,
+      "name": "Сидоряк Максим",
+      "github": null
+    },
+    {
+      "number": 18,
+      "name": "Согомонян Карен",
+      "github": null
+    },
+    {
+      "number": 19,
+      "name": "Строй Максим",
+      "github": null
+    },
+    {
+      "number": 20,
+      "name": "Таран Єгор",
+      "github": null
+    },
+    {
+      "number": 21,
+      "name": "Фортуна Артем",
+      "github": null
+    },
+    {
+      "number": 22,
+      "name": "Черненко Ярослав",
+      "github": null
+    },
+    {
+      "number": 23,
+      "name": "Чупіков Никодим",
+      "github": null
+    },
+    {
+      "number": 24,
+      "name": "Шаповалов Денис",
+      "github": null
+    },
+    {
+      "number": 25,
+      "name": "Юрченко Дмитро",
+      "github": null
+    }
+  ]
+}
