@@ -32,13 +32,18 @@ jobs:
           fail() {
             echo "::error::$1"
             echo
-            echo "Title: $TITLE"
+            echo "Title: [$TITLE]"
             echo "Format: type(scope): subject — type is one of $types,"
             echo "scope is optional and lowercase, subject starts lowercase, no trailing period,"
             echo "at most 72 characters in all. See CONTRIBUTING.md."
             exit 1
           }
 
+          # A space pasted in with the title is invisible on the pull request
+          # page, so it gets its own message rather than a format error.
+          case "$TITLE" in
+            [[:space:]]*|*[[:space:]]) fail "The title starts or ends with whitespace." ;;
+          esac
           printf '%s' "$TITLE" | grep -Eq "$format" \
             || fail "The title is not 'type(scope): subject' with a known type."
           case "$TITLE" in

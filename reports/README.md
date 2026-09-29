@@ -227,7 +227,7 @@ git push -u origin lab/02-software-security-methods/groups/pz-23-1-9/labs/03
 [CONTRIBUTING.md](../CONTRIBUTING.md): він і стане комітом у гілці лабораторної:
 
 ```
-reports(pz-23-1-9): lab 03, student 21
+reports(pz-23-1-9): pmzi lab 03, student 21
 ```
 
 Студентські коміти можуть називатися як завгодно — після squash їх у гілці не
@@ -267,7 +267,7 @@ reports(pz-23-1-9): lab 03, student 21
 напряму, перезберіть гілку вручну.
 
 **Закриття.** Коли здала вся група — злити `lab/…` у `main`, теж squash, із
-заголовком `reports(pz-23-1-9): close lab 03`. Заголовок треба вписати рукою:
+заголовком `reports(pz-23-1-9): close pmzi lab 03`. Заголовок треба вписати рукою:
 інакше GitHub підставить назву гілки, і саме так у `main` з'явився коміт
 `Lab/02 software security methods/…`. Перевірка **Pull request title** на
 пул-реквесті в `main` червона, доки заголовок не за форматом. Туди потрапляє
