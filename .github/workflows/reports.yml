@@ -153,9 +153,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           if [ -n "${{ github.event.pull_request.number }}" ]; then
-            git commit -m "Reports: build .docx for #${{ github.event.pull_request.number }} [skip ci]"
+            git commit -m "chore(reports): build .docx for #${{ github.event.pull_request.number }} [skip ci]"
           else
-            git commit -m "Reports: rebuild .docx [skip ci]"
+            git commit -m "chore(reports): rebuild .docx [skip ci]"
           fi
 
           # another merge may have landed meanwhile — rebase onto it and retry
