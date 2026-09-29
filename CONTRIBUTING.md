@@ -61,7 +61,7 @@ fits in 72 characters. It says what the commit does, not what the author did:
 feat(scripts): build a PDF next to every report .docx
 fix: stop the report build failing when it built nothing
 content(pmzi): let the student pick the implementation language
-reports(pz-23-1-9): lab 03, student 21
+reports(pz-23-1-9): pmzi lab 03, student 21
 docs: make a branch name repeat the path it collects
 ci: lint the title of a pull request into main
 chore: rebuild the guides after the language change
@@ -103,11 +103,14 @@ and the description of the pull request. Set the title before merging: GitHub
 otherwise fills it with the branch name, and `Lab/02 software security methods/…`
 is how #19 got into the history.
 
-| Pull request             | Squash commit                                  |
-|--------------------------|------------------------------------------------|
-| `report/…` → `lab/…`     | `reports(<group>): lab <NN>, student <number>` |
-| `lab/…` → `main`         | `reports(<group>): close lab <NN>`             |
-| `<type>/<slug>` → `main` | the title of the pull request                  |
+| Pull request             | Squash commit                                           |
+|--------------------------|---------------------------------------------------------|
+| `report/…` → `lab/…`     | `reports(<group>): <course> lab <NN>, student <number>` |
+| `lab/…` → `main`         | `reports(<group>): close <course> lab <NN>`             |
+| `<type>/<slug>` → `main` | the title of the pull request                           |
+
+`<course>` is `os` or `pmzi`: a group takes both subjects, and `lab 03` alone
+does not say which one.
 
 The merge of a report is the moment the pipeline builds its document: see the
 teacher's section of [reports/README.md](reports/README.md).
