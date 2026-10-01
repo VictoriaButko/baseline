@@ -7,13 +7,13 @@ The site is a static SPA on GitHub Pages — there is no backend. Two pipelines 
 the same markdown into Word documents in the format the college requires: teaching
 guides for the teacher and lab reports for the students.
 
-| Directory | Contents |
-|-----------|----------|
-| `content/uk/<course>/` | lectures, labs and self-study topics — the source of both the site and the guides |
-| `public/labs/` | generated teaching guides (.docx), one set per group |
-| `reports/` | student reports and the .docx built from them — see [reports/README.md](reports/README.md) |
-| `scripts/` | .docx generation and verification of the code examples |
-| `data/` | curricula, formatting samples, the report title page |
+| Directory              | Contents                                                                                   |
+|------------------------|--------------------------------------------------------------------------------------------|
+| `content/uk/<course>/` | lectures, labs and self-study topics — the source of both the site and the guides          |
+| `public/labs/`         | generated teaching guides (.docx), one set per group                                       |
+| `reports/`             | student reports and the .docx built from them — see [reports/README.md](reports/README.md) |
+| `scripts/`             | .docx generation and verification of the code examples                                     |
+| `data/`                | curricula, formatting samples, the report title page                                       |
 
 ```bash
 npm run dev               # run the site locally
@@ -93,6 +93,12 @@ only in the reference document and the page geometry.
   student writes only the procedure, the answers and the conclusion.
 
 Pandoc is required for both: `brew install pandoc` or `apt install pandoc`.
+
+## Contributing
+
+Branches, commit messages, pull requests and how they are merged are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Students never need it: their instructions
+are in [reports/README.md](reports/README.md).
 
 ## Language
 
