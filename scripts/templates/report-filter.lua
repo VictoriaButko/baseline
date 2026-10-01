@@ -12,7 +12,11 @@
       paragraph indent;
     * "double quotes" become «ялинки», the quotes of Ukrainian text;
     * a control question written "1 Текст питання?" is numbered "1. Текст
-      питання?".
+      питання?";
+    * superscript and subscript characters typed as Unicode — "2⁸³", "H₂O" —
+      become ordinary digits raised or lowered by Word. Times New Roman has
+      no glyphs for most of them, and a renderer that meets one falls back to
+      another font, which the PDF check rejects.
 
   Spacing and alignment come from the styles of report-template.docx; the
   filter only says which paragraph is which.
@@ -37,6 +41,72 @@ end
 
 local function trimmed(text)
   return (text:gsub('^%s*(.-)%s*$', '%1'))
+end
+
+-- Unicode superscripts and subscripts → the plain character they stand for.
+-- ¹²³ are in Times New Roman, the rest are not; all of them are converted so
+-- that "2¹⁶⁷" is set in one way, not half in glyphs and half in raised digits.
+local SUPERSCRIPT = {
+  ['⁰'] = '0', ['¹'] = '1', ['²'] = '2', ['³'] = '3', ['⁴'] = '4',
+  ['⁵'] = '5', ['⁶'] = '6', ['⁷'] = '7', ['⁸'] = '8', ['⁹'] = '9',
+  ['⁺'] = '+', ['⁻'] = '-', ['⁼'] = '=', ['⁽'] = '(', ['⁾'] = ')',
+  ['ⁿ'] = 'n', ['ⁱ'] = 'i'
+}
+local SUBSCRIPT = {
+  ['₀'] = '0', ['₁'] = '1', ['₂'] = '2', ['₃'] = '3', ['₄'] = '4',
+  ['₅'] = '5', ['₆'] = '6', ['₇'] = '7', ['₈'] = '8', ['₉'] = '9',
+  ['₊'] = '+', ['₋'] = '-', ['₌'] = '=', ['₍'] = '(', ['₎'] = ')',
+  ['ₐ'] = 'a', ['ₑ'] = 'e', ['ₒ'] = 'o', ['ₓ'] = 'x', ['ₕ'] = 'h',
+  ['ₖ'] = 'k', ['ₗ'] = 'l', ['ₘ'] = 'm', ['ₙ'] = 'n', ['ₚ'] = 'p',
+  ['ₛ'] = 's', ['ₜ'] = 't'
+}
+
+--- Which script a character is set in: 'super', 'sub' or nil for the baseline
+local function script_of(char)
+  if SUPERSCRIPT[char] then return 'super' end
+  if SUBSCRIPT[char] then return 'sub' end
+  return nil
+end
+
+--- "2⁸³" → Str "2", Superscript [Str "83"]; a word without such characters is
+--- left untouched. Code is not a Str and keeps whatever the student typed.
+function Str(str)
+  local chars = {}
+  local has_script = false
+  for _, code in utf8.codes(str.text) do
+    local char = utf8.char(code)
+    chars[#chars + 1] = char
+    if script_of(char) then has_script = true end
+  end
+  if not has_script then return nil end
+
+  local inlines = pandoc.List()
+  local run, run_script = {}, nil
+
+  local function flush()
+    if #run == 0 then return end
+    local text = pandoc.Str(table.concat(run))
+    if run_script == 'super' then
+      inlines:insert(pandoc.Superscript({ text }))
+    elseif run_script == 'sub' then
+      inlines:insert(pandoc.Subscript({ text }))
+    else
+      inlines:insert(text)
+    end
+    run = {}
+  end
+
+  for _, char in ipairs(chars) do
+    local script = script_of(char)
+    if script ~= run_script then
+      flush()
+      run_script = script
+    end
+    run[#run + 1] = SUPERSCRIPT[char] or SUBSCRIPT[char] or char
+  end
+  flush()
+
+  return inlines
 end
 
 --- "Прізвище" → «Прізвище»; single quotes stay as they are — in Ukrainian
