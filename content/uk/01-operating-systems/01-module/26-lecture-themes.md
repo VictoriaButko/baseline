@@ -526,72 +526,72 @@ echo "ґанок, їжак, єнот, ІНІЦІАЛИ → != >= 👋"
 
 **1.** Чим відрізняються теми GTK і Qt?
 
-- GTK оформлює програми на GTK (GNOME), Qt — програми на Qt (KDE)
-- GTK відповідає за іконки, Qt — за вікна
-- GTK працює лише у Wayland, Qt — лише в X11
 - різниці немає, це синоніми
+- GTK оформлює програми на GTK (GNOME), Qt — програми на Qt (KDE)
+- GTK працює лише у Wayland, Qt — лише в X11
+- GTK відповідає за іконки, Qt — за вікна
 
 **2.** Куди складають користувацькі теми GTK?
 
-- ~/.local/share/themes/ (або старий ~/.themes/)
 - ~/.local/share/fonts/
-- ~/.config/fontconfig/
 - /usr/share/icons/
+- ~/.config/fontconfig/
+- ~/.local/share/themes/ (або старий ~/.themes/)
 
 **3.** Куди встановлюють шрифти для одного користувача?
 
 - ~/.local/share/fonts/
+- ~/.icons/
 - /usr/share/themes/
 - ~/.config/autostart/
-- ~/.icons/
 
 **4.** Яка команда оновить кеш шрифтів після встановлення нових?
 
-- fc-cache -fv
-- fc-list
 - fc-match
 - gsettings set fonts
+- fc-cache -fv
+- fc-list
 
 **5.** Що покаже команда `fc-list`?
 
-- перелік доступних у системі шрифтів
-- перелік принтерів
 - перелік тем оформлення
+- перелік принтерів
+- перелік доступних у системі шрифтів
 - перелік завдань друку
 
 **6.** Що таке CUPS?
 
+- служба сканування документів
 - система друку, що керує принтерами й чергами завдань
 - набір тем оформлення
 - менеджер шрифтів
-- служба сканування документів
 
 **7.** За якою адресою відкривається вебінтерфейс CUPS?
 
-- http://localhost:631
-- http://localhost:8080
 - http://localhost:80
+- http://localhost:8080
 - http://localhost:9100
+- http://localhost:631
 
 **8.** Яка команда покаже перелік принтерів і принтер за замовчуванням?
 
-- lpstat -p -d
 - lpq
 - lp -d
+- lpstat -p -d
 - cancel
 
 **9.** Яка команда скасує завдання друку?
 
 - cancel номер-завдання
-- lpq -clear
 - cupsdisable
+- lpq -clear
 - lp -c
 
 **10.** Як увімкнути темну тему GNOME з командного рядка?
 
 - gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
-- gsettings set org.gnome.desktop.background dark true
 - gnome-tweaks --dark
+- gsettings set org.gnome.desktop.background dark true
 - fc-cache --dark
 
 ## Підсумок

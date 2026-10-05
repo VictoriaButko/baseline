@@ -554,73 +554,73 @@ diff ~/dotfiles/gnome/dconf-original.ini /tmp/now.ini
 
 **1.** Чим GNOME Tweaks відрізняється від GNOME Settings?
 
-- Tweaks відкриває приховані налаштування, яких немає в основній панелі
 - Tweaks — це та сама панель з іншою назвою
 - Tweaks керує лише мережею
 - Tweaks працює тільки в KDE
+- Tweaks відкриває приховані налаштування, яких немає в основній панелі
 
 **2.** Яка утиліта дає змогу змінювати налаштування GNOME з командного рядка?
 
-- gsettings
-- gnome-tweaks
-- kwriteconfig6
 - systemctl
+- gnome-tweaks
+- gsettings
+- kwriteconfig6
 
 **3.** Яка команда змінить тему GTK?
 
+- systemctl --user restart gtk
 - gsettings set org.gnome.desktop.interface gtk-theme "Назва"
 - gsettings get org.gnome.desktop.interface gtk-theme
 - gnome-extensions enable gtk-theme
-- systemctl --user restart gtk
 
 **4.** Де зберігаються встановлені користувачем розширення GNOME?
 
-- ~/.local/share/gnome-shell/extensions/
-- ~/.themes/
 - ~/.config/autostart/
 - /usr/share/xsessions/
+- ~/.local/share/gnome-shell/extensions/
+- ~/.themes/
 
 **5.** У якому каталозі лежать файли автозапуску програм користувача?
 
-- ~/.config/autostart/
 - ~/.local/share/icons/
 - ~/.themes/
 - /etc/systemd/system/
+- ~/.config/autostart/
 
 **6.** Який формат мають файли автозапуску?
 
+- .sh
 - .desktop
 - .service
 - .conf
-- .sh
 
 **7.** Чим автозапуск через systemd-службу користувача кращий за файл .desktop?
 
-- службою можна керувати: перезапускати, дивитися журнал, задавати залежності
-- вона запускається швидше
-- вона не потребує прав користувача
 - .desktop працює лише в KDE
+- службою можна керувати: перезапускати, дивитися журнал, задавати залежності
+- вона не потребує прав користувача
+- вона запускається швидше
 
 **8.** Куди складають користувацькі теми оформлення GTK?
 
 - ~/.local/share/themes/ (або старий ~/.themes/)
-- ~/.local/share/gnome-shell/extensions/
 - ~/.config/autostart/
 - /usr/share/themes/backup/
+- ~/.local/share/gnome-shell/extensions/
 
 **9.** Що таке Plasma Widgets?
 
+- набір гарячих клавіш
+- теми оформлення вікон
 - невеликі аплети, які додають на панель або робочий стіл у KDE
 - розширення для браузера
-- теми оформлення вікон
-- набір гарячих клавіш
 
 **10.** Чим KDE Plasma відрізняється від GNOME за підходом до налаштування?
 
-- у KDE кастомізація вбудована в системні налаштування, у GNOME її дають розширення
 - у GNOME більше вбудованих налаштувань, ніж у KDE
-- KDE взагалі не дозволяє змінювати панель
 - обидва середовища налаштовуються лише через файли конфігурації
+- KDE взагалі не дозволяє змінювати панель
+- у KDE кастомізація вбудована в системні налаштування, у GNOME її дають розширення
 
 ## Підсумок
 
