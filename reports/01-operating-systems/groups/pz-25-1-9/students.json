@@ -1,0 +1,157 @@
+{
+  "_comment": "Склад групи. Номер визначає шифр роботи на титулці (ФКЗЕ. F2ОС<номер>). Поле github студент вписує сам окремим пул-реквестом.",
+  "group": "pz-25-1-9",
+  "title": "ПЗ-25-1/9",
+  "students": [
+    {
+      "number": 1,
+      "name": "Абрамян Артем",
+      "github": null
+    },
+    {
+      "number": 2,
+      "name": "Бутко Вікторія",
+      "github": "VictoriaButko"
+    },
+    {
+      "number": 3,
+      "name": "Грановська Єва",
+      "github": null
+    },
+    {
+      "number": 4,
+      "name": "Гуторов Андрій",
+      "github": null
+    },
+    {
+      "number": 5,
+      "name": "Давидова Надія",
+      "github": "NaDav1205"
+    },
+    {
+      "number": 6,
+      "name": "Дєтков Нікіта",
+      "github": "nikitadietkov"
+    },
+    {
+      "number": 7,
+      "name": "Єремченко Арсеній",
+      "github": null
+    },
+    {
+      "number": 8,
+      "name": "Забора Кирило",
+      "github": "Krindlok"
+    },
+    {
+      "number": 9,
+      "name": "Зубенко Марія",
+      "github": null
+    },
+    {
+      "number": 10,
+      "name": "Кадилкіна Ксенія",
+      "github": "kseniakadylkina"
+    },
+    {
+      "number": 11,
+      "name": "Коваленко Давид",
+      "github": null
+    },
+    {
+      "number": 12,
+      "name": "Козлова Ксенія",
+      "github": null
+    },
+    {
+      "number": 13,
+      "name": "Краснов Іван",
+      "github": "WalkyWizard"
+    },
+    {
+      "number": 14,
+      "name": "Краснюк Григорій",
+      "github": null
+    },
+    {
+      "number": 15,
+      "name": "Кузьмич Олександр",
+      "github": null
+    },
+    {
+      "number": 16,
+      "name": "Лапко Артем",
+      "github": null
+    },
+    {
+      "number": 17,
+      "name": "Лоза Данил",
+      "github": null
+    },
+    {
+      "number": 18,
+      "name": "Мостовик Ярослав",
+      "github": null
+    },
+    {
+      "number": 19,
+      "name": "Погудін Михайло",
+      "github": null
+    },
+    {
+      "number": 20,
+      "name": "Польний Денис",
+      "github": null
+    },
+    {
+      "number": 21,
+      "name": "Приказчиков Арсентій",
+      "github": null
+    },
+    {
+      "number": 22,
+      "name": "Прокопенко Софія",
+      "github": null
+    },
+    {
+      "number": 23,
+      "name": "Рясний Ілля",
+      "github": null
+    },
+    {
+      "number": 24,
+      "name": "Сидоренко Іван",
+      "github": null
+    },
+    {
+      "number": 25,
+      "name": "Скрипник Костянтин",
+      "github": null
+    },
+    {
+      "number": 26,
+      "name": "Тіглий Микита",
+      "github": null
+    },
+    {
+      "number": 27,
+      "name": "Ткаченко Діана",
+      "github": null
+    },
+    {
+      "number": 28,
+      "name": "Шведова Анастасія",
+      "github": null
+    },
+    {
+      "number": 29,
+      "name": "Ященков Антон",
+      "github": null
+    },
+    {
+      "number": 30,
+      "name": "Годований Нікіта Артемович",
+      "github": "Nikita-Hodovanyj"
+    }
+  ]
+}
